@@ -3,94 +3,365 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>双语 RAG 智能问答引擎</title>
+    <title>Bilingual-RAG - 智能助手</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .chat-container { width: 100%; max-width: 800px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 85vh; }
-        .chat-header { background: #2c3e50; color: white; padding: 20px; border-radius: 12px 12px 0 0; text-align: center; font-size: 1.2em; font-weight: bold; }
-        .chat-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-        .message { max-width: 80%; padding: 12px 16px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; }
-        .user-msg { background: #3498db; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
-        .ai-msg { background: #ecf0f1; color: #333; align-self: flex-start; border-bottom-left-radius: 0; white-space: pre-wrap; }
-        .input-area { padding: 15px; background: #fff; border-top: 1px solid #ddd; border-radius: 0 0 12px 12px; display: flex; gap: 10px; }
-        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 6px; outline: none; font-size: 1em; }
-        button { padding: 12px 24px; background: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; transition: 0.3s; }
-        button:hover { background: #1a252f; }
-        button:disabled { background: #95a5a6; cursor: not-allowed; }
-        .loading { align-self: flex-start; color: #7f8c8d; font-size: 0.9em; font-style: italic; display: none; padding-left: 20px;}
+        :root {
+            --bg-main: #ffffff;
+            --bg-sidebar: #f9f9f9;
+            --text-main: #0d0d0d;
+            --text-muted: #6b7280;
+            --primary: #10a37f;
+            --primary-hover: #058f6b;
+            --border-color: #e5e7eb;
+            --hover-bg: #ececec;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+        }
+
+        /* --- 认证界面 (毛玻璃风格) --- */
+        #authSection {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+        }
+        .auth-card {
+            background: white; padding: 40px; border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 360px;
+            text-align: center; border: 1px solid var(--border-color);
+        }
+        .auth-card h3 { margin-top: 0; font-size: 1.5rem; margin-bottom: 24px; }
+        .auth-card input {
+            width: 100%; box-sizing: border-box; padding: 12px 16px; margin-bottom: 16px;
+            border: 1px solid var(--border-color); border-radius: 8px; font-size: 1rem; outline: none;
+        }
+        .auth-card input:focus { border-color: var(--primary); }
+        .auth-buttons button { width: 100%; margin-bottom: 10px; }
+
+        /* --- 左右分栏布局 --- */
+        #appContainer { display: none; width: 100%; height: 100%; }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column; padding: 16px 12px; box-sizing: border-box;
+        }
+        .new-chat-btn {
+            background: white; border: 1px solid var(--border-color); border-radius: 8px;
+            padding: 12px; text-align: left; font-weight: 500; font-size: 0.95rem; cursor: pointer;
+            transition: 0.2s; display: flex; align-items: center; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .new-chat-btn:hover { background: var(--hover-bg); }
+
+        /* --- 侧边栏历史记录项与删除按钮 --- */
+        .history-list { flex: 1; overflow-y: auto; margin-top: 16px; display: flex; flex-direction: column; gap: 4px; }
+        .history-list::-webkit-scrollbar { width: 4px; }
+        .history-list::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+
+        .history-item-container {
+            display: flex; align-items: center; justify-content: space-between;
+            border-radius: 8px; cursor: pointer; transition: 0.2s;
+        }
+        .history-item-container:hover { background: var(--hover-bg); }
+        .history-item-container.active { background: #e5e7eb; font-weight: 500; }
+
+        .history-item {
+            flex: 1; padding: 10px 12px; font-size: 0.9rem;
+            color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* 默认隐藏删除按钮，鼠标悬浮时显示 */
+        .delete-btn {
+            background: none; border: none; color: #ef4444; font-size: 1.2rem;
+            cursor: pointer; padding: 0 10px; display: none; line-height: 1;
+        }
+        .delete-btn:hover { color: #b91c1c; font-weight: bold; }
+        .history-item-container:hover .delete-btn { display: block; }
+
+        /* 用户底部信息 */
+        .user-profile { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-color); }
+        .logout-btn { color: #ef4444; width: 100%; text-align: left; padding: 8px; border-radius: 6px; cursor: pointer; background: none; border: none; font-size: 0.9rem;}
+        .logout-btn:hover { background: #fee2e2; }
+
+        /* 主聊天区 */
+        .main-content { flex: 1; display: flex; flex-direction: column; background: var(--bg-main); position: relative; }
+        .chat-box { flex: 1; padding: 40px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
+
+        .message-row { display: flex; width: 100%; max-width: 800px; margin: 0 auto; }
+        .message-row.user { justify-content: flex-end; }
+        .message-row.ai { justify-content: flex-start; }
+        .message { max-width: 85%; line-height: 1.6; font-size: 1rem; padding: 12px 18px; word-wrap: break-word; }
+
+        /* 用户气泡 */
+        .user-msg { background: #f4f4f5; color: var(--text-main); border-radius: 20px; border-bottom-right-radius: 4px; }
+        /* AI气泡 (如果喜欢纯文本风格可以去掉边框和背景) */
+        .ai-msg { background: white; color: var(--text-main); white-space: pre-wrap; padding: 12px 0; }
+
+        /* 悬浮输入框 */
+        .input-wrapper { padding: 20px 0 30px; background: linear-gradient(180deg, rgba(255,255,255,0) 0%, #ffffff 30%); width: 100%; }
+        .input-container {
+            max-width: 760px; margin: 0 auto; position: relative; display: flex; align-items: center;
+            background: #f4f4f5; border: 1px solid transparent; border-radius: 24px; padding: 6px 6px 6px 20px;
+            transition: 0.3s;
+        }
+        .input-container:focus-within { background: white; border-color: var(--border-color); box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        .input-container input { flex: 1; border: none; outline: none; font-size: 1rem; padding: 10px 0; background: transparent; }
+        .send-btn {
+            background: var(--text-main); color: white; border: none; border-radius: 18px;
+            padding: 8px 16px; font-weight: 500; transition: 0.2s; cursor: pointer;
+        }
+        .send-btn:hover { background: #333; }
+        .send-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+        /* 通用按钮与提示 */
+        button { font-family: inherit; }
+        .btn-primary { background: var(--primary); color: white; padding: 12px; border-radius: 8px; font-weight: 500; cursor: pointer; border: none;}
+        .btn-link { color: var(--text-muted); text-decoration: underline; margin-top: 10px; background: none; border: none; cursor: pointer;}
+        .loading { text-align: center; color: var(--text-muted); font-size: 0.85em; display: none; margin-bottom: 10px; font-style: italic;}
     </style>
 </head>
 <body>
 
-<div class="chat-container">
-    <div class="chat-header">🤖 跨语言 RAG 智能问答系统</div>
-    <div class="chat-box" id="chatBox">
-        <div class="message ai-msg">你好！我是由 Django 和 GLM-4 驱动的双语问答助手。你可以用中文或英文向我提问。</div>
+<div id="authSection">
+    <div class="auth-card">
+        <h3 id="authTitle">欢迎使用</h3>
+        <input type="text" id="username" placeholder="用户名">
+        <input type="password" id="password" placeholder="密码">
+        <div class="auth-buttons">
+            <button id="loginBtn" class="btn-primary" onclick="handleAuth('login')">登录</button>
+            <button id="registerBtn" class="btn-primary" onclick="handleAuth('register')" style="display: none; background: #27ae60;">注册</button>
+            <button class="btn-link" id="toggleBtn" onclick="toggleAuthMode()">没有账号？点击注册</button>
+        </div>
+        <p id="authTip" style="font-size: 0.85em; margin-top: 16px; height: 1em;"></p>
     </div>
-    <div class="loading" id="loadingTip">🧠 大模型正在思考中，请稍候...</div>
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="输入你的问题，按回车发送..." onkeypress="handleEnter(event)">
-        <button id="sendBtn" onclick="sendMessage()">发送 (Send)</button>
+</div>
+
+<div id="appContainer">
+    <div class="sidebar">
+        <button class="new-chat-btn" onclick="startNewChat()">
+            <span style="font-size: 1.2rem;">+</span> 新的对话
+        </button>
+        <div class="history-list" id="historyList">
+            </div>
+        <div class="user-profile">
+            <button class="logout-btn" onclick="handleLogout()">退出登录</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="chat-box" id="chatBox"></div>
+
+        <div class="input-wrapper">
+            <div class="loading" id="loadingTip">AI 正在飞速检索知识库...</div>
+            <div class="input-container">
+                <input type="text" id="userInput" placeholder="给智能助手发送消息..." onkeypress="if(event.key==='Enter')sendMessage()" autocomplete="off">
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
+    let isLoginMode = true;
+    let accessToken = localStorage.getItem('access_token');
     let currentConversationId = null;
 
-    async function sendMessage() {
-        const inputField = document.getElementById('userInput');
-        const sendBtn = document.getElementById('sendBtn');
-        const chatBox = document.getElementById('chatBox');
-        const loadingTip = document.getElementById('loadingTip');
-        const text = inputField.value.trim();
+    window.onload = () => { if (accessToken) initApp(); };
 
-        if (!text) return;
+    function toggleAuthMode() {
+        isLoginMode = !isLoginMode;
+        document.getElementById('authTitle').innerText = isLoginMode ? "欢迎使用" : "创建账号";
+        document.getElementById('loginBtn').style.display = isLoginMode ? "block" : "none";
+        document.getElementById('registerBtn').style.display = isLoginMode ? "none" : "block";
+        document.getElementById('toggleBtn').innerText = isLoginMode ? "没有账号？点击注册" : "已有账号？返回登录";
+        document.getElementById('authTip').innerText = "";
+    }
 
-        appendMessage(text, 'user-msg');
-        inputField.value = '';
-        inputField.disabled = true;
-        sendBtn.disabled = true;
-        loadingTip.style.display = 'block';
-        chatBox.scrollTop = chatBox.scrollHeight;
+    async function handleAuth(action) {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        const tip = document.getElementById('authTip');
+        const url = action === 'login' ? '/api/chat/login/' : '/api/chat/register/';
 
         try {
-            const response = await fetch('/api/chat/ask/', {
+            const res = await fetch(url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: u, password: p })
+            });
+            const data = await res.json();
+
+            if (res.ok) {
+                if (action === 'login') {
+                    localStorage.setItem('access_token', data.access);
+                    accessToken = data.access;
+                    initApp();
+                } else {
+                    tip.style.color = "#10a37f"; tip.innerText = "注册成功！请登录";
+                    setTimeout(toggleAuthMode, 1000);
+                }
+            } else {
+                tip.style.color = "#ef4444"; tip.innerText = action === 'login' ? "账号或密码错误" : "注册失败，换个用户名试试";
+            }
+        } catch (e) { tip.innerText = "网络异常，请确保后端运行中"; }
+    }
+
+    // 初始化应用
+    function initApp() {
+        document.getElementById('authSection').style.display = 'none';
+        document.getElementById('appContainer').style.display = 'flex';
+        fetchHistoryList();
+        startNewChat();
+    }
+
+    // 获取历史对话列表 (包含删除按钮逻辑)
+    async function fetchHistoryList() {
+        try {
+            const res = await fetch('/api/chat/history/', {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            if (res.status === 401) return handleLogout();
+            const list = await res.json();
+
+            const listDiv = document.getElementById('historyList');
+            listDiv.innerHTML = '';
+            list.forEach(item => {
+                const container = document.createElement('div');
+                container.className = `history-item-container ${item.id === currentConversationId ? 'active' : ''}`;
+
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'history-item';
+                titleDiv.innerText = item.title;
+                titleDiv.onclick = () => loadConversation(item.id);
+
+                const delBtn = document.createElement('button');
+                delBtn.className = 'delete-btn';
+                delBtn.innerHTML = '×';
+                delBtn.title = '删除此对话';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation(); // 防止触发点击加载对话
+                    deleteConversation(item.id);
+                };
+
+                container.appendChild(titleDiv);
+                container.appendChild(delBtn);
+                listDiv.appendChild(container);
+            });
+        } catch(e) { console.error("加载侧边栏失败"); }
+    }
+
+    // 执行删除请求
+    async function deleteConversation(convId) {
+        if (!confirm("确定要删除这条对话记录吗？删除后将无法恢复。")) return;
+
+        try {
+            const res = await fetch(`/api/chat/history/${convId}/delete/`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+
+            if (res.ok) {
+                if (currentConversationId === convId) {
+                    startNewChat();
+                } else {
+                    fetchHistoryList();
+                }
+            } else {
+                alert("删除失败，请稍后重试");
+            }
+        } catch(e) { console.error("网络异常"); }
+    }
+
+    // 点击侧边栏加载对话
+    async function loadConversation(convId) {
+        currentConversationId = convId;
+        fetchHistoryList(); // 刷新侧边栏高亮
+        const box = document.getElementById('chatBox');
+        box.innerHTML = '';
+
+        try {
+            const res = await fetch(`/api/chat/history/${convId}/`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            const msgs = await res.json();
+            msgs.forEach(msg => {
+                appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai');
+            });
+        } catch(e) { console.error("加载对话失败"); }
+    }
+
+    // 开启新对话
+    function startNewChat() {
+        currentConversationId = null;
+        fetchHistoryList();
+        const box = document.getElementById('chatBox');
+        box.innerHTML = '';
+        appendMessage("您好！我是双语 RAG 引擎，今天想问点关于知识库的什么问题？", 'ai');
+    }
+
+    // 发送消息
+    async function sendMessage() {
+        const input = document.getElementById('userInput');
+        const text = input.value.trim();
+        const loading = document.getElementById('loadingTip');
+        const sendBtn = document.getElementById('sendBtn');
+        if (!text) return;
+
+        appendMessage(text, 'user');
+        input.value = '';
+        loading.style.display = 'block';
+        sendBtn.disabled = true;
+
+        try {
+            const res = await fetch('/api/chat/ask/', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
                 body: JSON.stringify({ content: text, conversation_id: currentConversationId })
             });
 
-            const data = await response.json();
+            if (res.status === 401) { alert("登录已过期"); handleLogout(); return; }
 
-            if (response.ok) {
-                currentConversationId = data.conversation_id;
-                appendMessage(data.ai_message.content, 'ai-msg');
+            const data = await res.json();
+            if (res.ok) {
+                appendMessage(data.ai_message.content, 'ai');
+                if (!currentConversationId) {
+                    currentConversationId = data.conversation_id;
+                    fetchHistoryList();
+                }
             } else {
-                appendMessage("❌ 请求失败：" + (data.error || "未知错误"), 'ai-msg');
+                appendMessage("错误：" + data.error, 'ai');
             }
-        } catch (error) {
-            appendMessage("❌ 网络错误，请检查 Django 服务器是否运行。", 'ai-msg');
+        } catch (e) {
+            appendMessage("无法连接到服务", 'ai');
         } finally {
-            inputField.disabled = false;
+            loading.style.display = 'none';
             sendBtn.disabled = false;
-            loadingTip.style.display = 'none';
-            inputField.focus();
-            chatBox.scrollTop = chatBox.scrollHeight;
         }
     }
 
-    function appendMessage(text, className) {
-        const chatBox = document.getElementById('chatBox');
+    function appendMessage(text, role) {
+        const box = document.getElementById('chatBox');
+        const rowDiv = document.createElement('div');
+        rowDiv.className = `message-row ${role}`;
         const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${className}`;
+        msgDiv.className = `message ${role}-msg`;
         msgDiv.innerText = text;
-        chatBox.appendChild(msgDiv);
+        rowDiv.appendChild(msgDiv);
+        box.appendChild(rowDiv);
+        box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
     }
 
-    function handleEnter(event) {
-        if (event.key === 'Enter') sendMessage();
+    function handleLogout() {
+        localStorage.removeItem('access_token');
+        location.reload();
     }
 </script>
-
 </body>
 </html>

@@ -1,6 +1,16 @@
-POST http://127.0.0.1:8000/api/chat/ask/
+### 第一步：先向服务器发送账号密码，索要(获取)令牌
+POST http://127.0.0.1:8000/api/chat/login/
 Content-Type: application/json
 
 {
-  "content": "请问本系统的核心后端代号是什么？"
+  "username": "yume",
+  "password": "123456"
 }
+
+> {% client.global.set("my_token", response.body.access); %}
+# 👆 这行魔法代码的意思是：PyCharm 会自动把你拿到的 access 令牌存进一个叫 my_token 的盒子里
+
+
+### 第二步：带着刚才装进盒子的令牌，去查询历史记录
+GET http://127.0.0.1:8000/api/chat/history/
+Authorization: Bearer {{my_token}}
