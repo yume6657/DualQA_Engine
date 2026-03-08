@@ -1,0 +1,6 @@
+POST http://127.0.0.1:8000/api/chat/ask/
+Content-Type: application/json
+
+{
+  "content": "请问本系统的核心后端代号是什么？"
+}

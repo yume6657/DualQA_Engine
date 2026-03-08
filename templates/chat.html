@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>双语 RAG 智能问答引擎</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .chat-container { width: 100%; max-width: 800px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 85vh; }
+        .chat-header { background: #2c3e50; color: white; padding: 20px; border-radius: 12px 12px 0 0; text-align: center; font-size: 1.2em; font-weight: bold; }
+        .chat-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { max-width: 80%; padding: 12px 16px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; }
+        .user-msg { background: #3498db; color: white; align-self: flex-end; border-bottom-right-radius: 0; }
+        .ai-msg { background: #ecf0f1; color: #333; align-self: flex-start; border-bottom-left-radius: 0; white-space: pre-wrap; }
+        .input-area { padding: 15px; background: #fff; border-top: 1px solid #ddd; border-radius: 0 0 12px 12px; display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 6px; outline: none; font-size: 1em; }
+        button { padding: 12px 24px; background: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1em; transition: 0.3s; }
+        button:hover { background: #1a252f; }
+        button:disabled { background: #95a5a6; cursor: not-allowed; }
+        .loading { align-self: flex-start; color: #7f8c8d; font-size: 0.9em; font-style: italic; display: none; padding-left: 20px;}
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">🤖 跨语言 RAG 智能问答系统</div>
+    <div class="chat-box" id="chatBox">
+        <div class="message ai-msg">你好！我是由 Django 和 GLM-4 驱动的双语问答助手。你可以用中文或英文向我提问。</div>
+    </div>
+    <div class="loading" id="loadingTip">🧠 大模型正在思考中，请稍候...</div>
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="输入你的问题，按回车发送..." onkeypress="handleEnter(event)">
+        <button id="sendBtn" onclick="sendMessage()">发送 (Send)</button>
+    </div>
+</div>
+
+<script>
+    let currentConversationId = null;
+
+    async function sendMessage() {
+        const inputField = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const chatBox = document.getElementById('chatBox');
+        const loadingTip = document.getElementById('loadingTip');
+        const text = inputField.value.trim();
+
+        if (!text) return;
+
+        appendMessage(text, 'user-msg');
+        inputField.value = '';
+        inputField.disabled = true;
+        sendBtn.disabled = true;
+        loadingTip.style.display = 'block';
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        try {
+            const response = await fetch('/api/chat/ask/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: text, conversation_id: currentConversationId })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                currentConversationId = data.conversation_id;
+                appendMessage(data.ai_message.content, 'ai-msg');
+            } else {
+                appendMessage("❌ 请求失败：" + (data.error || "未知错误"), 'ai-msg');
+            }
+        } catch (error) {
+            appendMessage("❌ 网络错误，请检查 Django 服务器是否运行。", 'ai-msg');
+        } finally {
+            inputField.disabled = false;
+            sendBtn.disabled = false;
+            loadingTip.style.display = 'none';
+            inputField.focus();
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    }
+
+    function appendMessage(text, className) {
+        const chatBox = document.getElementById('chatBox');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${className}`;
+        msgDiv.innerText = text;
+        chatBox.appendChild(msgDiv);
+    }
+
+    function handleEnter(event) {
+        if (event.key === 'Enter') sendMessage();
+    }
+</script>
+
+</body>
+</html>
