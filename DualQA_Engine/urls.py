@@ -17,10 +17,10 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
-from chat.views import chat_page # 导入我们刚写的网页视图
+from chat.views import chat_page
 
 urlpatterns = [
-    path('', chat_page, name='home'), # 当访问根目录时，展示精美的聊天网页
+    path('', chat_page, name='home'),
     path('admin/', admin.site.urls),
     path('api/chat/', include('chat.urls')),
 ]

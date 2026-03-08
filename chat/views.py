@@ -19,9 +19,9 @@ def register_user(request):
     """接收用户名和密码，注册新用户"""
     serializer = UserSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save() # 这里会自动触发我们在 Serializer 里写的密码加密逻辑
+        serializer.save()
         return Response({"message": "🎉 注册成功！欢迎加入。"}, status=status.HTTP_201_CREATED)
-    # 如果用户名已被注册，或者格式不对，直接把报错信息扔给前端
+
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -29,12 +29,12 @@ def register_user(request):
 
 
 @api_view(['POST'])
-# 🌟 核心：这两行装饰器告诉 Django，访问这个接口必须带上合法的令牌
+
 def chat_with_ai(request):
-    # 1. 自动识别用户：只要令牌合法，Django 会自动把用户对象塞进 request.user
+
     user = request.user
 
-    # 验证用户是否已通过认证 (虽然有装饰器，但写个判断更严谨)
+
     if not user.is_authenticated:
         return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -44,21 +44,21 @@ def chat_with_ai(request):
     if not user_content:
         return Response({"error": "提问内容不能为空"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 2. 对话隔离：查询或创建对话时，必须带上 user=user
+
     if conversation_id:
         try:
-            # 只能获取属于当前用户的对话，防止越权查看他人记录
+
             conversation = Conversation.objects.get(id=conversation_id, user=user)
         except Conversation.DoesNotExist:
             return Response({"error": "找不到该对话或您无权访问"}, status=status.HTTP_403_FORBIDDEN)
     else:
-        # 新建对话时，自动绑定到当前登录的用户
+
         conversation = Conversation.objects.create(
             title=user_content[:15] + "...",
             user=user
         )
 
-    # 3. 后续逻辑保持不变（获取历史、检索知识、调 AI）
+
     history_messages = Message.objects.filter(conversation=conversation).order_by('created_at')
     history_str = ""
     for msg in history_messages:
@@ -87,7 +87,6 @@ def chat_with_ai(request):
     }, status=status.HTTP_200_OK)
 
 
-# ================= 新增：历史记录接口 =================
 
 @api_view(['GET'])
 def get_conversation_list(request):
@@ -96,7 +95,7 @@ def get_conversation_list(request):
     if not user.is_authenticated:
         return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
 
-    # 面试考点：只查询属于当前 user 的数据，按时间倒序排列
+
     convs = Conversation.objects.filter(user=user).order_by('-created_at')
 
     # 组装简单的数据返回给前端的侧边栏
@@ -112,17 +111,17 @@ def get_conversation_detail(request, conv_id):
         return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
 
     try:
-        # 面试考点：必须同时校验 conv_id 和 user，防止用户A偷看用户B的记录 (越权访问)
+
         conv = Conversation.objects.get(id=conv_id, user=user)
         msgs = Message.objects.filter(conversation=conv).order_by('created_at')
 
-        # 复用之前的 MessageSerializer 序列化数据
+
         return Response(MessageSerializer(msgs, many=True).data, status=status.HTTP_200_OK)
     except Conversation.DoesNotExist:
         return Response({"error": "找不到该对话或无权访问"}, status=status.HTTP_403_FORBIDDEN)
 
 
-# ================= 新增：删除对话接口 =================
+
 @api_view(['DELETE'])
 def delete_conversation(request, conv_id):
     """删除指定的历史会话"""

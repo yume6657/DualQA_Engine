@@ -1,0 +1,5 @@
+The 2026 Internship Program at DualQA Tech Center offers a special "Innovation Bonus".
+Interns who complete their first Django project within 30 days are eligible for a
+one-time scholarship of 5000 CNY. Additionally, every Friday afternoon is designated
+as "Code & Coffee Time," where interns can claim a free Caramel Macchiato at the
+university's north gate cafeteria by showing their digital ID.
