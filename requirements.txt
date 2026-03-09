@@ -1,0 +1,18 @@
+# 核心 Web 依赖
+django
+djangorestframework
+djangorestframework-simplejwt
+python-dotenv
+
+# AI 与 RAG 核心依赖
+langchain
+langchain-openai
+langchain-community
+langchain-chroma
+zhipuai
+
+# 文档处理依赖 (必须包含 pypdf 才能识别 PDF)
+pypdf
+
+# 向量数据库驱动
+chromadb
