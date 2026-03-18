@@ -3,173 +3,657 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bilingual-RAG - 智能助手</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>DualQA Engine - 智能助手</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-main: #ffffff;
-            --bg-sidebar: #f9f9f9;
-            --text-main: #0d0d0d;
-            --text-muted: #6b7280;
-            --primary: #10a37f;
-            --primary-hover: #058f6b;
-            --border-color: #e5e7eb;
-            --hover-bg: #ececec;
+            --bg-deep: #050d1a;
+            --bg-panel: rgba(8, 20, 40, 0.85);
+            --bg-card: rgba(10, 25, 50, 0.9);
+            --neon-blue: #00d4ff;
+            --neon-green: #00ff9d;
+            --neon-purple: #7b5ea7;
+            --text-main: #e2eaf5;
+            --text-muted: #6b8aad;
+            --border-glow: rgba(0, 212, 255, 0.2);
+            --border-dim: rgba(0, 212, 255, 0.08);
+            --hover-glow: rgba(0, 212, 255, 0.06);
+            --user-bubble: rgba(0, 212, 255, 0.12);
+            --ai-bubble: rgba(0, 255, 157, 0.04);
         }
 
+        * { box-sizing: border-box; }
+
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: 'Inter', -apple-system, sans-serif;
             margin: 0;
             height: 100vh;
             display: flex;
             overflow: hidden;
-            background-color: var(--bg-main);
+            background-color: var(--bg-deep);
             color: var(--text-main);
         }
 
-        /* --- 认证界面 (毛玻璃风格) --- */
+        /* 粒子画布背景 */
+        #particleCanvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.5;
+        }
+
+        /* ========== 认证界面 ========== */
         #authSection {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(10px);
-            display: flex; align-items: center; justify-content: center; z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
         }
+
         .auth-card {
-            background: white; padding: 40px; border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 360px;
-            text-align: center; border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            backdrop-filter: blur(24px);
+            padding: 44px 40px;
+            border-radius: 16px;
+            border: 1px solid var(--border-glow);
+            box-shadow: 0 0 40px rgba(0, 212, 255, 0.08), 0 0 80px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+            animation: fadeSlideUp 0.5s ease;
         }
-        .auth-card h3 { margin-top: 0; font-size: 1.5rem; margin-bottom: 24px; }
+
+        .auth-card::before {
+            content: '';
+            position: absolute;
+            top: -1px; left: 20%; right: 20%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+        }
+
+        .auth-logo {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            letter-spacing: 3px;
+            color: var(--neon-blue);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            opacity: 0.8;
+        }
+
+        .auth-card h3 {
+            margin: 0 0 28px;
+            font-size: 1.5rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #ffffff, var(--neon-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
         .auth-card input {
-            width: 100%; box-sizing: border-box; padding: 12px 16px; margin-bottom: 16px;
-            border: 1px solid var(--border-color); border-radius: 8px; font-size: 1rem; outline: none;
+            width: 100%;
+            padding: 12px 16px;
+            margin-bottom: 14px;
+            background: rgba(0, 212, 255, 0.04);
+            border: 1px solid var(--border-glow);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            color: var(--text-main);
+            outline: none;
+            transition: 0.3s;
+            font-family: inherit;
         }
-        .auth-card input:focus { border-color: var(--primary); }
+        .auth-card input::placeholder { color: var(--text-muted); }
+        .auth-card input:focus {
+            border-color: var(--neon-blue);
+            background: rgba(0, 212, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+        }
+
         .auth-buttons button { width: 100%; margin-bottom: 10px; }
 
-        /* --- 左右分栏布局 --- */
-        #appContainer { display: none; width: 100%; height: 100%; }
+        /* ========== 应用主体布局 ========== */
+        #appContainer { display: none; width: 100%; height: 100%; position: relative; z-index: 1; }
 
         /* 侧边栏 */
         .sidebar {
-            width: 260px; background-color: var(--bg-sidebar); border-right: 1px solid var(--border-color);
-            display: flex; flex-direction: column; padding: 16px 12px; box-sizing: border-box;
+            width: 260px;
+            background: var(--bg-panel);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border-dim);
+            display: flex;
+            flex-direction: column;
+            padding: 16px 12px;
+            position: relative;
         }
-        .new-chat-btn {
-            background: white; border: 1px solid var(--border-color); border-radius: 8px;
-            padding: 12px; text-align: left; font-weight: 500; font-size: 0.95rem; cursor: pointer;
-            transition: 0.2s; display: flex; align-items: center; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-        }
-        .new-chat-btn:hover { background: var(--hover-bg); }
 
-        /* --- 侧边栏历史记录项与删除按钮 --- */
-        .history-list { flex: 1; overflow-y: auto; margin-top: 16px; display: flex; flex-direction: column; gap: 4px; }
-        .history-list::-webkit-scrollbar { width: 4px; }
-        .history-list::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 2px; }
+        .sidebar-header {
+            padding: 8px 4px 16px;
+            border-bottom: 1px solid var(--border-dim);
+            margin-bottom: 12px;
+        }
+
+        .sidebar-brand {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 2px;
+            color: var(--neon-blue);
+            text-transform: uppercase;
+            opacity: 0.7;
+            margin-bottom: 2px;
+        }
+
+        .sidebar-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .new-chat-btn {
+            background: rgba(0, 212, 255, 0.06);
+            border: 1px solid var(--border-glow);
+            border-radius: 8px;
+            padding: 11px 14px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-main);
+            font-family: inherit;
+        }
+        .new-chat-btn:hover {
+            background: rgba(0, 212, 255, 0.12);
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 12px rgba(0, 212, 255, 0.12);
+        }
+        .new-chat-btn .icon {
+            width: 18px; height: 18px;
+            background: var(--neon-blue);
+            border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1rem;
+            color: var(--bg-deep);
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        /* 历史记录 */
+        .history-section-label {
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            padding: 12px 4px 6px;
+        }
+
+        .history-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+        .history-list::-webkit-scrollbar { width: 3px; }
+        .history-list::-webkit-scrollbar-track { background: transparent; }
+        .history-list::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.2); border-radius: 2px; }
 
         .history-item-container {
-            display: flex; align-items: center; justify-content: space-between;
-            border-radius: 8px; cursor: pointer; transition: 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.2s;
+            border: 1px solid transparent;
         }
-        .history-item-container:hover { background: var(--hover-bg); }
-        .history-item-container.active { background: #e5e7eb; font-weight: 500; }
+        .history-item-container:hover {
+            background: var(--hover-glow);
+            border-color: var(--border-dim);
+        }
+        .history-item-container.active {
+            background: rgba(0, 212, 255, 0.08);
+            border-color: var(--border-glow);
+        }
 
         .history-item {
-            flex: 1; padding: 10px 12px; font-size: 0.9rem;
-            color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            flex: 1;
+            padding: 9px 10px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: 0.2s;
         }
+        .history-item-container:hover .history-item,
+        .history-item-container.active .history-item { color: var(--text-main); }
 
-        /* 默认隐藏删除按钮，鼠标悬浮时显示 */
         .delete-btn {
-            background: none; border: none; color: #ef4444; font-size: 1.2rem;
-            cursor: pointer; padding: 0 10px; display: none; line-height: 1;
+            background: none; border: none;
+            color: transparent;
+            font-size: 1rem;
+            cursor: pointer;
+            padding: 0 10px;
+            display: none;
+            line-height: 1;
+            transition: 0.2s;
         }
-        .delete-btn:hover { color: #b91c1c; font-weight: bold; }
-        .history-item-container:hover .delete-btn { display: block; }
+        .delete-btn:hover { color: #ff4d6d !important; }
+        .history-item-container:hover .delete-btn { display: block; color: rgba(255, 77, 109, 0.5); }
 
-        /* 用户底部信息 */
-        .user-profile { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-color); }
-        .logout-btn { color: #ef4444; width: 100%; text-align: left; padding: 8px; border-radius: 6px; cursor: pointer; background: none; border: none; font-size: 0.9rem;}
-        .logout-btn:hover { background: #fee2e2; }
+        /* 用户底部 */
+        .user-profile {
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-dim);
+        }
 
-        /* 主聊天区 */
-        .main-content { flex: 1; display: flex; flex-direction: column; background: var(--bg-main); position: relative; }
-        .chat-box { flex: 1; padding: 40px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
+        .logout-btn {
+            color: rgba(255, 77, 109, 0.7);
+            width: 100%;
+            text-align: left;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-size: 0.85rem;
+            font-family: inherit;
+            transition: 0.2s;
+        }
+        .logout-btn:hover { color: #ff4d6d; background: rgba(255, 77, 109, 0.08); }
 
-        .message-row { display: flex; width: 100%; max-width: 800px; margin: 0 auto; }
+        /* ========== 主聊天区 ========== */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: transparent;
+            position: relative;
+        }
+
+        /* 顶部标题栏 */
+        .chat-header {
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--border-dim);
+            background: rgba(5, 13, 26, 0.5);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--neon-green);
+            box-shadow: 0 0 6px var(--neon-green);
+            animation: pulse 2s infinite;
+        }
+
+        .chat-header-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 1px;
+        }
+
+        .chat-header-title span { color: var(--neon-blue); }
+
+        /* 聊天消息区 */
+        .chat-box {
+            flex: 1;
+            padding: 32px 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+        }
+        .chat-box::-webkit-scrollbar { width: 4px; }
+        .chat-box::-webkit-scrollbar-track { background: transparent; }
+        .chat-box::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.15); border-radius: 2px; }
+
+        .message-row { display: flex; width: 100%; max-width: 820px; margin: 0 auto; animation: fadeSlideUp 0.3s ease; }
         .message-row.user { justify-content: flex-end; }
-        .message-row.ai { justify-content: flex-start; }
-        .message { max-width: 85%; line-height: 1.6; font-size: 1rem; padding: 12px 18px; word-wrap: break-word; }
+        .message-row.ai { justify-content: flex-start; gap: 12px; }
 
-        /* 用户气泡 */
-        .user-msg { background: #f4f4f5; color: var(--text-main); border-radius: 20px; border-bottom-right-radius: 4px; }
-        /* AI气泡 (如果喜欢纯文本风格可以去掉边框和背景) */
-        .ai-msg { background: white; color: var(--text-main); white-space: pre-wrap; padding: 12px 0; }
+        .ai-avatar {
+            width: 30px; height: 30px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 255, 157, 0.2));
+            border: 1px solid var(--border-glow);
+            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem;
+            color: var(--neon-blue);
+            font-family: 'JetBrains Mono', monospace;
+            margin-top: 2px;
+        }
 
-        /* 悬浮输入框 */
-        .input-wrapper { padding: 20px 0 30px; background: linear-gradient(180deg, rgba(255,255,255,0) 0%, #ffffff 30%); width: 100%; }
+        .message {
+            max-width: 82%;
+            line-height: 1.7;
+            font-size: 0.95rem;
+            padding: 12px 18px;
+            word-wrap: break-word;
+            border-radius: 12px;
+        }
+
+        .user-msg {
+            background: var(--user-bubble);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+            border-bottom-right-radius: 4px;
+            color: var(--text-main);
+        }
+
+        .ai-msg {
+            background: var(--ai-bubble);
+            border: 1px solid rgba(0, 255, 157, 0.08);
+            border-bottom-left-radius: 4px;
+            color: var(--text-main);
+            white-space: pre-wrap;
+            padding: 14px 18px;
+        }
+
+        /* 输入框区域 */
+        .input-wrapper {
+            padding: 16px 20px 24px;
+            background: linear-gradient(180deg, transparent 0%, rgba(5, 13, 26, 0.95) 40%);
+        }
+
+        .loading {
+            text-align: center;
+            font-size: 0.8rem;
+            display: none;
+            margin-bottom: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 1px;
+        }
+
+        .loading-inner {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--neon-blue);
+            background: rgba(0, 212, 255, 0.06);
+            border: 1px solid var(--border-glow);
+            padding: 6px 16px;
+            border-radius: 20px;
+        }
+
+        .loading-dots span {
+            display: inline-block;
+            width: 4px; height: 4px;
+            border-radius: 50%;
+            background: var(--neon-blue);
+            animation: dot-bounce 1.4s infinite;
+        }
+        .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
         .input-container {
-            max-width: 760px; margin: 0 auto; position: relative; display: flex; align-items: center;
-            background: #f4f4f5; border: 1px solid transparent; border-radius: 24px; padding: 6px 6px 6px 20px;
+            max-width: 780px;
+            margin: 0 auto;
+            position: relative;
+            display: flex;
+            align-items: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border-glow);
+            border-radius: 14px;
+            padding: 6px 6px 6px 18px;
             transition: 0.3s;
+            backdrop-filter: blur(20px);
         }
-        .input-container:focus-within { background: white; border-color: var(--border-color); box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
-        .input-container input { flex: 1; border: none; outline: none; font-size: 1rem; padding: 10px 0; background: transparent; }
-        .send-btn {
-            background: var(--text-main); color: white; border: none; border-radius: 18px;
-            padding: 8px 16px; font-weight: 500; transition: 0.2s; cursor: pointer;
+        .input-container:focus-within {
+            border-color: rgba(0, 212, 255, 0.5);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.08), 0 0 20px rgba(0, 212, 255, 0.06);
         }
-        .send-btn:hover { background: #333; }
-        .send-btn:disabled { background: #ccc; cursor: not-allowed; }
 
-        /* 通用按钮与提示 */
+        .input-container input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 0.95rem;
+            padding: 10px 0;
+            background: transparent;
+            color: var(--text-main);
+            font-family: inherit;
+        }
+        .input-container input::placeholder { color: var(--text-muted); }
+
+        .send-btn {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.9), rgba(0, 180, 220, 0.9));
+            color: var(--bg-deep);
+            border: none;
+            border-radius: 10px;
+            padding: 9px 20px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            transition: 0.2s;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.5px;
+        }
+        .send-btn:hover {
+            background: linear-gradient(135deg, var(--neon-blue), rgba(0, 180, 220, 1));
+            box-shadow: 0 0 14px rgba(0, 212, 255, 0.4);
+            transform: translateY(-1px);
+        }
+        .send-btn:disabled {
+            background: rgba(107, 138, 173, 0.2);
+            color: var(--text-muted);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* ========== 通用按钮 ========== */
         button { font-family: inherit; }
-        .btn-primary { background: var(--primary); color: white; padding: 12px; border-radius: 8px; font-weight: 500; cursor: pointer; border: none;}
-        .btn-link { color: var(--text-muted); text-decoration: underline; margin-top: 10px; background: none; border: none; cursor: pointer;}
-        .loading { text-align: center; color: var(--text-muted); font-size: 0.85em; display: none; margin-bottom: 10px; font-style: italic;}
+
+        .btn-primary {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.85), rgba(0, 160, 210, 0.85));
+            color: var(--bg-deep);
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            font-size: 0.95rem;
+            transition: 0.2s;
+        }
+        .btn-primary:hover {
+            box-shadow: 0 0 18px rgba(0, 212, 255, 0.35);
+            transform: translateY(-1px);
+        }
+
+        .btn-register {
+            background: linear-gradient(135deg, rgba(0, 255, 157, 0.8), rgba(0, 200, 120, 0.8)) !important;
+        }
+        .btn-register:hover {
+            box-shadow: 0 0 18px rgba(0, 255, 157, 0.35) !important;
+        }
+
+        .btn-link {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            text-decoration: none;
+            margin-top: 8px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .btn-link:hover { color: var(--neon-blue); }
+
+        #authTip {
+            font-size: 0.82em;
+            margin-top: 14px;
+            min-height: 1.2em;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* ========== 动画 ========== */
+        @keyframes fadeSlideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--neon-green); }
+            50% { opacity: 0.5; box-shadow: 0 0 12px var(--neon-green); }
+        }
+
+        @keyframes dot-bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* 扫描线效果 */
+        .main-content::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 212, 255, 0.012) 2px,
+                rgba(0, 212, 255, 0.012) 4px
+            );
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .chat-box, .chat-header, .input-wrapper { position: relative; z-index: 1; }
     </style>
 </head>
 <body>
 
+<canvas id="particleCanvas"></canvas>
+
+<!-- 认证界面 -->
 <div id="authSection">
     <div class="auth-card">
+        <div class="auth-logo">DualQA Engine v2.0</div>
         <h3 id="authTitle">欢迎使用</h3>
         <input type="text" id="username" placeholder="用户名">
-        <input type="password" id="password" placeholder="密码">
+        <input type="password" id="password" placeholder="密码" onkeypress="if(event.key==='Enter')handleAuth(isLoginMode?'login':'register')">
         <div class="auth-buttons">
-            <button id="loginBtn" class="btn-primary" onclick="handleAuth('login')">登录</button>
-            <button id="registerBtn" class="btn-primary" onclick="handleAuth('register')" style="display: none; background: #27ae60;">注册</button>
+            <button id="loginBtn" class="btn-primary" onclick="handleAuth('login')">登 录</button>
+            <button id="registerBtn" class="btn-primary btn-register" onclick="handleAuth('register')" style="display: none;">注 册</button>
             <button class="btn-link" id="toggleBtn" onclick="toggleAuthMode()">没有账号？点击注册</button>
         </div>
-        <p id="authTip" style="font-size: 0.85em; margin-top: 16px; height: 1em;"></p>
+        <p id="authTip"></p>
     </div>
 </div>
 
+<!-- 主应用 -->
 <div id="appContainer">
     <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">DualQA Engine</div>
+            <div class="sidebar-title">智能知识助手</div>
+        </div>
+
         <button class="new-chat-btn" onclick="startNewChat()">
-            <span style="font-size: 1.2rem;">+</span> 新的对话
+            <span class="icon">+</span>
+            新的对话
         </button>
-        <div class="history-list" id="historyList">
-            </div>
+
+        <div class="history-section-label">历史对话</div>
+        <div class="history-list" id="historyList"></div>
+
         <div class="user-profile">
-            <button class="logout-btn" onclick="handleLogout()">退出登录</button>
+            <button class="logout-btn" onclick="handleLogout()">⏻ 退出登录</button>
         </div>
     </div>
 
     <div class="main-content">
+        <div class="chat-header">
+            <div class="status-dot"></div>
+            <div class="chat-header-title">RAG · <span>双语检索增强生成</span> · 已就绪</div>
+        </div>
+
         <div class="chat-box" id="chatBox"></div>
 
         <div class="input-wrapper">
-            <div class="loading" id="loadingTip">AI 正在飞速检索知识库...</div>
+            <div class="loading" id="loadingTip">
+                <span class="loading-inner">
+                    <span class="loading-dots"><span></span><span></span><span></span></span>
+                    正在检索知识库
+                </span>
+            </div>
             <div class="input-container">
-                <input type="text" id="userInput" placeholder="给智能助手发送消息..." onkeypress="if(event.key==='Enter')sendMessage()" autocomplete="off">
-                <button class="send-btn" id="sendBtn" onclick="sendMessage()">发送</button>
+                <input type="text" id="userInput" placeholder="向智能助手提问..." onkeypress="if(event.key==='Enter')sendMessage()" autocomplete="off">
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">SEND</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
+    // ========== 粒子背景 ==========
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    function createParticle() {
+        return {
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3,
+            size: Math.random() * 1.5 + 0.5,
+            opacity: Math.random() * 0.4 + 0.1,
+            color: Math.random() > 0.5 ? '0, 212, 255' : '0, 255, 157'
+        };
+    }
+
+    for (let i = 0; i < 80; i++) particles.push(createParticle());
+
+    function drawParticles() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach((p, i) => {
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+            if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${p.color}, ${p.opacity})`;
+            ctx.fill();
+
+            // 连线
+            for (let j = i + 1; j < particles.length; j++) {
+                const dx = particles[j].x - p.x;
+                const dy = particles[j].y - p.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 100) {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.strokeStyle = `rgba(0, 212, 255, ${0.06 * (1 - dist / 100)})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+            }
+        });
+        requestAnimationFrame(drawParticles);
+    }
+    drawParticles();
+
+    // ========== 应用逻辑 ==========
     let isLoginMode = true;
     let accessToken = localStorage.getItem('access_token');
     let currentConversationId = null;
@@ -193,7 +677,8 @@
 
         try {
             const res = await fetch(url, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: u, password: p })
             });
             const data = await res.json();
@@ -204,16 +689,20 @@
                     accessToken = data.access;
                     initApp();
                 } else {
-                    tip.style.color = "#10a37f"; tip.innerText = "注册成功！请登录";
+                    tip.style.color = "#00ff9d";
+                    tip.innerText = "// 注册成功，正在跳转...";
                     setTimeout(toggleAuthMode, 1000);
                 }
             } else {
-                tip.style.color = "#ef4444"; tip.innerText = action === 'login' ? "账号或密码错误" : "注册失败，换个用户名试试";
+                tip.style.color = "#ff4d6d";
+                tip.innerText = action === 'login' ? "// 认证失败：账号或密码错误" : "// 注册失败，请更换用户名";
             }
-        } catch (e) { tip.innerText = "网络异常，请确保后端运行中"; }
+        } catch (e) {
+            tip.style.color = "#ff4d6d";
+            tip.innerText = "// 网络异常：无法连接到服务器";
+        }
     }
 
-    // 初始化应用
     function initApp() {
         document.getElementById('authSection').style.display = 'none';
         document.getElementById('appContainer').style.display = 'flex';
@@ -221,7 +710,6 @@
         startNewChat();
     }
 
-    // 获取历史对话列表 (包含删除按钮逻辑)
     async function fetchHistoryList() {
         try {
             const res = await fetch('/api/chat/history/', {
@@ -243,12 +731,9 @@
 
                 const delBtn = document.createElement('button');
                 delBtn.className = 'delete-btn';
-                delBtn.innerHTML = '×';
+                delBtn.innerHTML = '✕';
                 delBtn.title = '删除此对话';
-                delBtn.onclick = (e) => {
-                    e.stopPropagation(); // 防止触发点击加载对话
-                    deleteConversation(item.id);
-                };
+                delBtn.onclick = (e) => { e.stopPropagation(); deleteConversation(item.id); };
 
                 container.appendChild(titleDiv);
                 container.appendChild(delBtn);
@@ -257,56 +742,42 @@
         } catch(e) { console.error("加载侧边栏失败"); }
     }
 
-    // 执行删除请求
     async function deleteConversation(convId) {
-        if (!confirm("确定要删除这条对话记录吗？删除后将无法恢复。")) return;
-
+        if (!confirm("确定要删除这条对话记录吗？")) return;
         try {
             const res = await fetch(`/api/chat/history/${convId}/delete/`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${accessToken}` }
             });
-
             if (res.ok) {
-                if (currentConversationId === convId) {
-                    startNewChat();
-                } else {
-                    fetchHistoryList();
-                }
-            } else {
-                alert("删除失败，请稍后重试");
-            }
+                if (currentConversationId === convId) startNewChat();
+                else fetchHistoryList();
+            } else { alert("删除失败，请稍后重试"); }
         } catch(e) { console.error("网络异常"); }
     }
 
-    // 点击侧边栏加载对话
     async function loadConversation(convId) {
         currentConversationId = convId;
-        fetchHistoryList(); // 刷新侧边栏高亮
+        fetchHistoryList();
         const box = document.getElementById('chatBox');
         box.innerHTML = '';
-
         try {
             const res = await fetch(`/api/chat/history/${convId}/`, {
                 headers: { 'Authorization': `Bearer ${accessToken}` }
             });
             const msgs = await res.json();
-            msgs.forEach(msg => {
-                appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai');
-            });
+            msgs.forEach(msg => appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai'));
         } catch(e) { console.error("加载对话失败"); }
     }
 
-    // 开启新对话
     function startNewChat() {
         currentConversationId = null;
         fetchHistoryList();
         const box = document.getElementById('chatBox');
         box.innerHTML = '';
-        appendMessage("您好！我是双语 RAG 引擎，今天想问点关于知识库的什么问题？", 'ai');
+        appendMessage("系统已就绪。我是双语 RAG 引擎，可以对知识库进行中英文检索与问答。请开始提问。", 'ai');
     }
 
-    // 发送消息
     async function sendMessage() {
         const input = document.getElementById('userInput');
         const text = input.value.trim();
@@ -350,6 +821,14 @@
         const box = document.getElementById('chatBox');
         const rowDiv = document.createElement('div');
         rowDiv.className = `message-row ${role}`;
+
+        if (role === 'ai') {
+            const avatar = document.createElement('div');
+            avatar.className = 'ai-avatar';
+            avatar.innerText = 'AI';
+            rowDiv.appendChild(avatar);
+        }
+
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${role}-msg`;
         msgDiv.innerText = text;

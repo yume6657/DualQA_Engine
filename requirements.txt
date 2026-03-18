@@ -16,3 +16,6 @@ pypdf
 
 # 向量数据库驱动
 chromadb
+
+# 双重检索精度保障：BM25 关键词检索
+rank-bm25

@@ -1,4 +1,6 @@
 import os
+import re
+import pickle
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
@@ -11,12 +13,13 @@ os.environ["OPENAI_API_BASE"] = "https://open.bigmodel.cn/api/paas/v4/"
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PERSIST_DIR = os.path.join(BASE_DIR, "chroma_db")
+BM25_INDEX_PATH = os.path.join(BASE_DIR, "bm25_index.pkl")
 
-# 1. 初始化模型
+# ── 模型初始化 ──────────────────────────────────────────────────────
 llm = ChatOpenAI(model="glm-4-flash", temperature=0.3)
 embeddings = OpenAIEmbeddings(model="embedding-3")
 
-# 2. 连接向量库 (增加存量检查)
+# ── 向量库连接 ──────────────────────────────────────────────────────
 try:
     vectorstore = Chroma(
         persist_directory=PERSIST_DIR,
@@ -24,32 +27,205 @@ try:
         collection_name="bilingual_rag"
     )
     count = vectorstore._collection.count()
-    print(f"🔗 向量库连接成功！绝对路径: {PERSIST_DIR}")
-    print(f"📈 数据库在线记录数: {count}")
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    print(f"🔗 向量库连接成功！记录数: {count}")
 except Exception as e:
-    print(f"❌ 数据库连接失败: {e}")
-    retriever = None
+    print(f"❌ 向量库连接失败: {e}")
+    vectorstore = None
+
+# ── BM25 索引加载 ───────────────────────────────────────────────────
+_bm25_data = None
+if os.path.exists(BM25_INDEX_PATH):
+    try:
+        with open(BM25_INDEX_PATH, "rb") as f:
+            _bm25_data = pickle.load(f)
+        print(f"🔑 BM25 索引加载成功！语料片段数: {len(_bm25_data['corpus'])}")
+    except Exception as e:
+        print(f"⚠️ BM25 索引加载失败: {e}")
+else:
+    print("⚠️ 未找到 BM25 索引，请先运行 ingest_data.py")
 
 
-# ==========================================
-# 🚀 新增核心模块：多轮对话提问重写 (Query Rewrite)
-# ==========================================
+# ══════════════════════════════════════════════════════════════════════
+# 工具函数
+# ══════════════════════════════════════════════════════════════════════
+
+def _tokenize(text: str) -> list[str]:
+    """与 ingest_data.py 保持一致的双语分词。"""
+    return re.findall(r'[\u4e00-\u9fff]|[a-zA-Z0-9]+', text.lower())
+
+
+def _reciprocal_rank_fusion(
+    vector_docs: list, bm25_texts: list[str], k: int = 60
+) -> list[str]:
+    """
+    RRF 融合排序：将向量检索和 BM25 检索的排名合并为统一分数。
+    公式：score(d) = Σ 1/(k + rank_i(d))
+    返回按融合分数降序排列的文本列表。
+    """
+    scores: dict[str, float] = {}
+
+    # 向量检索排名贡献
+    for rank, doc in enumerate(vector_docs):
+        text = doc.page_content
+        scores[text] = scores.get(text, 0.0) + 1.0 / (k + rank + 1)
+
+    # BM25 排名贡献
+    for rank, text in enumerate(bm25_texts):
+        scores[text] = scores.get(text, 0.0) + 1.0 / (k + rank + 1)
+
+    sorted_texts = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [text for text, _ in sorted_texts]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 第一重保障：混合检索（Hybrid Retrieval）
+# ══════════════════════════════════════════════════════════════════════
+
+def _vector_search(query: str, k: int = 5) -> list:
+    """向量语义检索，返回 Document 列表。"""
+    if not vectorstore:
+        return []
+    try:
+        return vectorstore.similarity_search(query, k=k)
+    except Exception as e:
+        print(f"⚠️ 向量检索失败: {e}")
+        return []
+
+
+def _bm25_search(query: str, k: int = 5) -> list[str]:
+    """BM25 关键词检索，返回文本列表。"""
+    if not _bm25_data:
+        return []
+    try:
+        tokens = _tokenize(query)
+        scores = _bm25_data["bm25"].get_scores(tokens)
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+        return [_bm25_data["corpus"][i] for i in top_indices if scores[i] > 0]
+    except Exception as e:
+        print(f"⚠️ BM25 检索失败: {e}")
+        return []
+
+
+def hybrid_search(query: str, top_k: int = 5) -> list[str]:
+    """
+    混合检索：向量检索 + BM25 检索，通过 RRF 融合排序后返回 top_k 结果。
+    """
+    vector_docs = _vector_search(query, k=top_k)
+    bm25_texts = _bm25_search(query, k=top_k)
+
+    if not vector_docs and not bm25_texts:
+        return []
+
+    fused = _reciprocal_rank_fusion(vector_docs, bm25_texts)
+    return fused[:top_k]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 第二重保障：相关性过滤（Relevance Gating）
+# ══════════════════════════════════════════════════════════════════════
+
+_relevance_prompt = PromptTemplate(
+    input_variables=["question", "context"],
+    template="""你是一个严格的相关性评估专家。请判断以下【参考片段】是否包含回答【问题】所需的实质性信息。
+
+【问题】
+{question}
+
+【参考片段】
+{context}
+
+评分规则（只输出数字，不要任何解释）：
+- 2：片段直接包含问题答案或关键事实
+- 1：片段与问题话题相关，有一定参考价值
+- 0：片段与问题无关或信息量极低
+
+输出（仅一个数字 0/1/2）："""
+)
+
+_relevance_chain = _relevance_prompt | llm | StrOutputParser()
+
+
+def _score_relevance(question: str, context_text: str) -> int:
+    """对单个检索片段打相关性分，返回 0/1/2。"""
+    try:
+        raw = _relevance_chain.invoke({
+            "question": question,
+            "context": context_text[:300]  # 截断避免超 token
+        }).strip()
+        score = int(raw[0]) if raw and raw[0] in "012" else 0
+        return score
+    except Exception:
+        return 1  # 评分失败时保守保留
+
+
+def filter_by_relevance(question: str, candidates: list[str], threshold: int = 1) -> list[str]:
+    """
+    相关性过滤：对每个候选片段打分，只保留分数 >= threshold 的片段。
+    threshold=1 表示至少"话题相关"才保留。
+    """
+    if not candidates:
+        return []
+
+    scored = []
+    for text in candidates:
+        score = _score_relevance(question, text)
+        print(f"  📊 相关性评分 {score}/2 | 片段: {text[:40]}...")
+        if score >= threshold:
+            scored.append((score, text))
+
+    # 按分数降序排列
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [text for _, text in scored]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 对外接口：双重保障检索
+# ══════════════════════════════════════════════════════════════════════
+
+def get_relevant_context(query: str) -> str:
+    """
+    双重检索精度保障：
+      第一重 → 混合检索（向量 + BM25 + RRF 融合）
+      第二重 → 相关性过滤（LLM 评分，去除噪声片段）
+    返回过滤后的上下文字符串，若无有效结果返回空字符串。
+    """
+    print(f"\n🔍 [双重检索] {query[:60]}...")
+
+    # 第一重：混合检索
+    candidates = hybrid_search(query, top_k=6)
+    print(f"  ✅ 混合检索命中 {len(candidates)} 个候选片段")
+
+    if not candidates:
+        print("  ⚠️ 混合检索无结果，跳过相关性过滤")
+        return ""
+
+    # 第二重：相关性过滤
+    filtered = filter_by_relevance(query, candidates, threshold=1)
+    print(f"  ✅ 相关性过滤后保留 {len(filtered)} 个高质量片段")
+
+    if not filtered:
+        print("  ⚠️ 所有片段均被过滤，降级为无上下文推理")
+        return ""
+
+    # 最终取前 3 个最相关片段
+    return "\n\n".join(filtered[:3])
+
+
+# ═════════════════════════════════════════════════════════════
+# 提问重写模块（保持不变）
+# ══════════════════════════════════════════════════════════════════════
+
 def rewrite_question(history_str: str, user_content: str) -> str:
-    """
-    RAG 历史感知模块：将包含代词的模糊提问重写为独立的精准搜索词。
-    """
-    # 如果没有历史记录，直接返回原问题，节省 API 算力和时间
+    """将含代词的模糊提问重写为独立精准搜索词。"""
     if not history_str or not history_str.strip():
         return user_content
 
-    # 定义专门的重写 Prompt
     rewrite_prompt = PromptTemplate(
         input_variables=["history", "question"],
         template="""你是一个专业的跨语言提问重写专家。请阅读以下历史对话，并将用户的最新提问重写为一个独立、完整、意思明确的句子，以便于在向量数据库中进行精准检索。
 
         严格遵守以下规则：
-        1. 补全原问题中的所有代词（如“它”、“那个”、“这”）。
+        1. 补全原问题中的所有代词（如"它"、"那个"、"这"）。
         2. 补全省略的主语、谓语或宾语。
         3. 保持专业词汇的语种不变（中英混合提问需准确还原术语）。
         4. 如果原问题已经很完整，无需修改，直接原样输出。
@@ -64,48 +240,24 @@ def rewrite_question(history_str: str, user_content: str) -> str:
         重写后的独立提问："""
     )
 
-    # 构建重写链并确保输出为纯字符串
     rewrite_chain = rewrite_prompt | llm | StrOutputParser()
-
     try:
-        standalone_question = rewrite_chain.invoke({
-            "history": history_str,
-            "question": user_content
-        })
-        return standalone_question.strip()
+        return rewrite_chain.invoke({"history": history_str, "question": user_content}).strip()
     except Exception as e:
         print(f"⚠️ 提问重写失败，降级使用原问题: {e}")
         return user_content
 
 
-# ==========================================
-# 3. 增强的检索函数
-# ==========================================
-def get_relevant_context(query: str) -> str:
-    if not retriever: return ""
+# ══════════════════════════════════════════════════════════════════════
+# 最终回答生成
+# ══════════════════════════════════════════════════════════════════════
 
-    # 核心调试：手动执行相似度搜索
-    docs = vectorstore.similarity_search(query, k=3)
-
-    if not docs:
-        print(f"⚠️ 警告：针对搜索词 '{query}' 未检索到任何匹配片段！")
-        return ""
-
-    print(f"🔎 成功匹配到 {len(docs)} 条参考资料")
-    print(f"📄 样例内容: {docs[0].page_content[:50]}...")
-
-    return "\n\n".join([doc.page_content for doc in docs])
-
-
-# ==========================================
-# 4. 生成最终回答
-# ==========================================
 prompt_template = ChatPromptTemplate.from_messages([
     ("system", """你是一个具备高级跨语言理解能力的智能问答 Agent。
 原则：
 1. 【精准检索】：必须优先基于提供的参考知识回答。
 2. 【跨语言】：如果参考知识是英文，请用中文准确转述；如果用户用英文提问，请用英文回答。
-3. 【诚实】：如果参考知识中没有相关内容，请结合上下文给出合理推断，或直接告知“知识库中未提及”，绝不瞎编。"""),
+3. 【诚实】：如果参考知识中没有相关内容，请结合上下文给出合理推断，或直接告知"知识库中未提及"，绝不瞎编。"""),
     ("user", """【参考知识】\n{context}\n\n【对话历史】\n{chat_history}\n\n【当前问题】\n{user_input}""")
 ])
 
