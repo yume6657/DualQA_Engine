@@ -1,11 +1,20 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Conversation, Message
+from .models import Conversation, Message, ConversationSummary
 from .serializers import MessageSerializer, UserSerializer
+import json
 
 # 引入我们在 ai_bot 中写好的核心逻辑
-from .ai_bot import get_bilingual_response, get_relevant_context, rewrite_question
+from .ai_bot import (
+    get_bilingual_response,
+    get_relevant_context,
+    rewrite_question,
+    generate_summary,
+    compress_summary,
+    format_summary_for_prompt,
+    SUMMARY_CONFIG
+)
 
 from django.shortcuts import render
 from rest_framework.permissions import IsAuthenticated
@@ -54,6 +63,89 @@ def chat_with_ai(request):
         )
 
     # ==========================================
+    # 🚀 新增：长期记忆摘要机制
+    # ==========================================
+    # 获取对话总消息数（包括即将存入的用户消息）
+    total_messages = Message.objects.filter(conversation=conversation).count() + 1
+
+    # 摘要触发逻辑
+    SUMMARY_THRESHOLD = SUMMARY_CONFIG["initial_threshold"]
+    SUMMARY_UPDATE_INTERVAL = SUMMARY_CONFIG["update_interval"]
+
+    summary_text = ""
+
+    if total_messages >= SUMMARY_THRESHOLD:
+        # 检查是否需要生成/更新摘要
+        try:
+            summary_obj = ConversationSummary.objects.get(conversation=conversation)
+            last_summarized_id = summary_obj.last_summarized_message_id
+
+            # 检查是否有足够的新消息需要摘要
+            new_messages_count = Message.objects.filter(
+                conversation=conversation,
+                id__gt=last_summarized_id
+            ).count()
+
+            if new_messages_count >= SUMMARY_UPDATE_INTERVAL:
+                # 更新摘要
+                print(f"📝 [摘要更新] 对话 {conversation.id} 有 {new_messages_count} 条新消息，开始更新摘要...")
+
+                new_messages = Message.objects.filter(
+                    conversation=conversation,
+                    id__gt=last_summarized_id
+                ).order_by('created_at')
+
+                summary_dict = generate_summary(
+                    list(new_messages),
+                    summary_obj.content
+                )
+
+                # 压缩检查
+                if SUMMARY_CONFIG["compression_enabled"]:
+                    summary_dict = compress_summary(
+                        summary_dict,
+                        SUMMARY_CONFIG["max_summary_length"]
+                    )
+
+                # 更新数据库
+                summary_obj.content = json.dumps(summary_dict, ensure_ascii=False)
+                summary_obj.last_summarized_message_id = new_messages.last().id
+                summary_obj.save()
+
+                summary_text = format_summary_for_prompt(summary_dict)
+                print(f"✅ [摘要更新] 摘要已更新，覆盖至消息 ID {summary_obj.last_summarized_message_id}")
+            else:
+                # 使用现有摘要
+                summary_dict = json.loads(summary_obj.content)
+                summary_text = format_summary_for_prompt(summary_dict)
+                print(f"📖 [摘要读取] 使用现有摘要（覆盖至消息 ID {last_summarized_id}）")
+
+        except ConversationSummary.DoesNotExist:
+            # 首次生成摘要
+            print(f"🆕 [摘要生成] 对话 {conversation.id} 达到 {total_messages} 条消息，首次生成摘要...")
+
+            # 获取窗口外的所有历史消息（排除最近 6 条）
+            old_messages = Message.objects.filter(
+                conversation=conversation
+            ).order_by('created_at')
+
+            # 如果消息数 > 6，则对前面的消息生成摘要
+            if old_messages.count() > 6:
+                messages_to_summarize = list(old_messages[:-6])
+
+                summary_dict = generate_summary(messages_to_summarize)
+
+                # 创建摘要记录
+                ConversationSummary.objects.create(
+                    conversation=conversation,
+                    content=json.dumps(summary_dict, ensure_ascii=False),
+                    last_summarized_message_id=messages_to_summarize[-1].id
+                )
+
+                summary_text = format_summary_for_prompt(summary_dict)
+                print(f"✅ [摘要生成] 首次摘要已生成，覆盖 {len(messages_to_summarize)} 条历史消息")
+
+    # ==========================================
     # 🚀 亮点：滑动窗口记忆（最近 3 轮 / 6 条消息）
     # ==========================================
     # 1. 按时间倒序拿到最近的 6 条记录（转化成 list 以便后续操作）
@@ -63,6 +155,9 @@ def chat_with_ai(request):
     history_messages = reversed(recent_messages)
 
     history_str = ""
+    if summary_text:
+        history_str = f"【长期记忆摘要】\n{summary_text}\n\n【最近对话】\n"
+
     for msg in history_messages:
         role_name = "用户" if msg.role == "user" else "AI"
         history_str += f"{role_name}: {msg.content}\n"

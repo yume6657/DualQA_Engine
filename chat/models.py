@@ -22,3 +22,27 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.role}: {self.content[:20]}"
+
+
+class ConversationSummary(models.Model):
+    """对话长期记忆摘要"""
+    conversation = models.OneToOneField(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name='summary'
+    )
+
+    # 摘要内容（结构化 JSON 存储）
+    content = models.TextField(help_text="JSON 格式存储的结构化摘要")
+
+    # 摘要覆盖的消息范围
+    last_summarized_message_id = models.BigIntegerField(
+        help_text="最后一条被纳入摘要的消息 ID"
+    )
+
+    # 元数据
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Summary for {self.conversation.title}"

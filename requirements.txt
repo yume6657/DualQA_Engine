@@ -3,6 +3,8 @@ django
 djangorestframework
 djangorestframework-simplejwt
 python-dotenv
+pymysql
+django-cors-headers
 
 # AI 与 RAG 核心依赖
 langchain

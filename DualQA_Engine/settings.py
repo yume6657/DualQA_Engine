@@ -79,12 +79,8 @@ WSGI_APPLICATION = "DualQA_Engine.wsgi.application"
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'dualqa_db',      # 创建的数据库名字
-        'USER': 'root',           # MySQL 用户名
-        'PASSWORD': '1023',
-        'HOST': '127.0.0.1',      # 本地数据库地址
-        'PORT': '3306',           # MySQL 默认端口
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
@@ -134,4 +130,11 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+}
+
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
 }
