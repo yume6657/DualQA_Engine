@@ -1,6 +1,5 @@
 from django.urls import path
 from . import views
-# 🌟 新增：导入 JWT 官方提供的发证(登录)和换证接口
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 urlpatterns = [
@@ -11,4 +10,9 @@ urlpatterns = [
     path('history/', views.get_conversation_list, name='history_list'),
     path('history/<int:conv_id>/', views.get_conversation_detail, name='history_detail'),
     path('history/<int:conv_id>/delete/', views.delete_conversation, name='delete_conversation'),
+    path('knowledge-base/upload/', views.upload_knowledge_base, name='kb_upload'),
+    path('knowledge-base/current/', views.current_knowledge_base, name='kb_current'),
+    path('knowledge-base/content/', views.knowledge_base_content, name='kb_content'),
+    path('profile/', views.user_profile, name='user_profile'),
+    path('profile/avatar/', views.upload_avatar, name='upload_avatar'),
 ]

@@ -12,38 +12,41 @@ load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv("ZHIPU_API_KEY")
 os.environ["OPENAI_API_BASE"] = "https://open.bigmodel.cn/api/paas/v4/"
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PERSIST_DIR = os.path.join(BASE_DIR, "chroma_db")
-BM25_INDEX_PATH = os.path.join(BASE_DIR, "bm25_index.pkl")
-
 # ── 模型初始化 ──────────────────────────────────────────────────────
 llm = ChatOpenAI(model="glm-4-flash", temperature=0.3)
 embeddings = OpenAIEmbeddings(model="embedding-3")
 
-# ── 向量库连接 ──────────────────────────────────────────────────────
-try:
-    vectorstore = Chroma(
-        persist_directory=PERSIST_DIR,
-        embedding_function=embeddings,
-        collection_name="bilingual_rag"
-    )
-    count = vectorstore._collection.count()
-    print(f"[INFO] 向量库连接成功！记录数: {count}")
-except Exception as e:
-    print(f"[ERROR] 向量库连接失败: {e}")
-    vectorstore = None
 
-# ── BM25 索引加载 ───────────────────────────────────────────────────
-_bm25_data = None
-if os.path.exists(BM25_INDEX_PATH):
+def _get_active_kb(user):
+    """获取当前用户激活的知识库记录，无则返回 None。"""
     try:
-        with open(BM25_INDEX_PATH, "rb") as f:
-            _bm25_data = pickle.load(f)
-        print(f"[INFO] BM25 索引加载成功！语料片段数: {len(_bm25_data['corpus'])}")
-    except Exception as e:
-        print(f"[WARN] BM25 索引加载失败: {e}")
-else:
-    print("[WARN] 未找到 BM25 索引，请先运行 ingest_data.py")
+        from .models import KnowledgeBaseSession
+        return KnowledgeBaseSession.objects.filter(user=user, is_active=True).first()
+    except Exception:
+        return None
+
+
+def _load_vectorstore(kb):
+    if not kb:
+        return None
+    try:
+        return Chroma(
+            persist_directory=kb.persist_directory,
+            embedding_function=embeddings,
+            collection_name=kb.collection_name,
+        )
+    except Exception:
+        return None
+
+
+def _load_bm25(kb):
+    if not kb or not os.path.exists(kb.bm25_index_path):
+        return None
+    try:
+        with open(kb.bm25_index_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -82,37 +85,39 @@ def _reciprocal_rank_fusion(
 # 第一重保障：混合检索（Hybrid Retrieval）
 # ══════════════════════════════════════════════════════════════════════
 
-def _vector_search(query: str, k: int = 5) -> list:
+def _vector_search(query: str, user, k: int = 5) -> list:
     """向量语义检索，返回 Document 列表。"""
-    if not vectorstore:
+    kb = _get_active_kb(user)
+    vs = _load_vectorstore(kb)
+    if not vs:
         return []
     try:
-        return vectorstore.similarity_search(query, k=k)
+        return vs.similarity_search(query, k=k)
     except Exception as e:
         print(f"⚠️ 向量检索失败: {e}")
         return []
 
 
-def _bm25_search(query: str, k: int = 5) -> list[str]:
+def _bm25_search(query: str, user, k: int = 5) -> list[str]:
     """BM25 关键词检索，返回文本列表。"""
-    if not _bm25_data:
+    kb = _get_active_kb(user)
+    bm25_data = _load_bm25(kb)
+    if not bm25_data:
         return []
     try:
         tokens = _tokenize(query)
-        scores = _bm25_data["bm25"].get_scores(tokens)
+        scores = bm25_data["bm25"].get_scores(tokens)
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
-        return [_bm25_data["corpus"][i] for i in top_indices if scores[i] > 0]
+        return [bm25_data["corpus"][i] for i in top_indices if scores[i] > 0]
     except Exception as e:
         print(f"⚠️ BM25 检索失败: {e}")
         return []
 
 
-def hybrid_search(query: str, top_k: int = 5) -> list[str]:
-    """
-    混合检索：向量检索 + BM25 检索，通过 RRF 融合排序后返回 top_k 结果。
-    """
-    vector_docs = _vector_search(query, k=top_k)
-    bm25_texts = _bm25_search(query, k=top_k)
+def hybrid_search(query: str, user, top_k: int = 5) -> list[str]:
+    """混合检索：向量检索 + BM25 检索，通过 RRF 融合排序后返回 top_k 结果。"""
+    vector_docs = _vector_search(query, user, k=top_k)
+    bm25_texts = _bm25_search(query, user, k=top_k)
 
     if not vector_docs and not bm25_texts:
         return []
@@ -183,7 +188,7 @@ def filter_by_relevance(question: str, candidates: list[str], threshold: int = 1
 # 对外接口：双重保障检索
 # ══════════════════════════════════════════════════════════════════════
 
-def get_relevant_context(query: str) -> str:
+def get_relevant_context(query: str, user=None) -> str:
     """
     双重检索精度保障：
       第一重 → 混合检索（向量 + BM25 + RRF 融合）
@@ -193,7 +198,7 @@ def get_relevant_context(query: str) -> str:
     print(f"\n[SEARCH] 双重检索: {query[:60]}...")
 
     # 第一重：混合检索
-    candidates = hybrid_search(query, top_k=6)
+    candidates = hybrid_search(query, user, top_k=6)
     print(f"  [OK] 混合检索命中 {len(candidates)} 个候选片段")
 
     if not candidates:

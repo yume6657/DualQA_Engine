@@ -1,5 +1,16 @@
+import uuid
 from django.db import models
-from django.contrib.auth.models import User  # 🌟 核心：导入 Django 官方的强大用户表
+from django.contrib.auth.models import User
+
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    nickname = models.CharField(max_length=50, blank=True)
+    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
+
+    def __str__(self):
+        return f"Profile({self.user.username})"
+
 
 
 class Conversation(models.Model):
@@ -46,3 +57,22 @@ class ConversationSummary(models.Model):
 
     def __str__(self):
         return f"Summary for {self.conversation.title}"
+
+
+class KnowledgeBaseSession(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='kb_sessions')
+    name = models.CharField(max_length=255)
+    source_file_name = models.CharField(max_length=255)
+    collection_name = models.CharField(max_length=100)
+    persist_directory = models.CharField(max_length=500)
+    bm25_index_path = models.CharField(max_length=500)
+    source_file_path = models.CharField(max_length=500, default='')
+    chunk_count = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['user', 'is_active'])]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.name} ({'active' if self.is_active else 'inactive'})"

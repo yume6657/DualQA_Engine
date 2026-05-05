@@ -1,7 +1,12 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes, authentication_classes
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Conversation, Message, ConversationSummary
+from rest_framework_simplejwt.authentication import JWTAuthentication
+import os
+import tempfile
+from .models import Conversation, Message, ConversationSummary, KnowledgeBaseSession, UserProfile
+from .knowledge_base_service import build_knowledge_base, delete_knowledge_base_dir, ALLOWED_EXTENSIONS, MAX_FILE_SIZE
 from .serializers import MessageSerializer, UserSerializer
 import json
 
@@ -175,7 +180,7 @@ def chat_with_ai(request):
     print(f"[后台路由] 大模型重写后搜索词: {standalone_question}\n")
 
     # 第 2 步：拿着重写后的清洗问题去查向量库
-    retrieved_context = get_relevant_context(standalone_question)
+    retrieved_context = get_relevant_context(standalone_question, user)
 
     # 第 3 步：最终生成回答
     try:
@@ -237,3 +242,197 @@ def delete_conversation(request, conv_id):
         return Response({"message": "删除成功"}, status=status.HTTP_200_OK)
     except Conversation.DoesNotExist:
         return Response({"error": "找不到该对话或无权删除"}, status=status.HTTP_403_FORBIDDEN)
+
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@parser_classes([MultiPartParser])
+def upload_knowledge_base(request):
+    """上传 txt/pdf 文件，解析并向量化为当前用户的临时知识库。"""
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    file = request.FILES.get('file')
+    if not file:
+        return Response({"error": "请上传文件"}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return Response({"error": f"仅支持 .txt 和 .pdf 文件"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if file.size > MAX_FILE_SIZE:
+        return Response({"error": "文件大小不能超过 20MB"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 保存到临时文件
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        for chunk in file.chunks():
+            tmp.write(chunk)
+        tmp_path = tmp.name
+
+    try:
+        result = build_knowledge_base(tmp_path, user.id)
+    except Exception as e:
+        os.unlink(tmp_path)
+        return Response({"error": f"知识库构建失败: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    # 先停用旧知识库并删除其文件
+    old_kb = KnowledgeBaseSession.objects.filter(user=user, is_active=True).first()
+    old_kb_dir = None
+    if old_kb:
+        old_kb_dir = os.path.dirname(old_kb.persist_directory)
+        old_kb.is_active = False
+        old_kb.save()
+
+    # 创建新知识库记录
+    new_kb = KnowledgeBaseSession.objects.create(
+        user=user,
+        name=file.name,
+        source_file_name=file.name,
+        collection_name=result["collection_name"],
+        persist_directory=result["persist_directory"],
+        bm25_index_path=result["bm25_index_path"],
+        source_file_path=result["source_file_path"],
+        chunk_count=result["chunk_count"],
+        is_active=True,
+    )
+
+    # 删除旧目录（新库已激活后再删）
+    if old_kb_dir:
+        delete_knowledge_base_dir(old_kb_dir)
+
+    return Response({
+        "name": new_kb.name,
+        "chunk_count": new_kb.chunk_count,
+        "replaced": old_kb is not None,
+    }, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'DELETE'])
+@authentication_classes([JWTAuthentication])
+def current_knowledge_base(request):
+    """GET: 查询当前激活知识库；DELETE: 清空当前知识库。"""
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    kb = KnowledgeBaseSession.objects.filter(user=user, is_active=True).first()
+
+    if request.method == 'GET':
+        if not kb:
+            return Response({"active": False}, status=status.HTTP_200_OK)
+        return Response({
+            "active": True,
+            "name": kb.name,
+            "chunk_count": kb.chunk_count,
+            "created_at": kb.created_at.strftime("%m-%d %H:%M"),
+        }, status=status.HTTP_200_OK)
+
+    # DELETE
+    if kb:
+        kb_dir = os.path.dirname(kb.persist_directory)
+        kb.delete()
+        delete_knowledge_base_dir(kb_dir)
+    return Response({"message": "知识库已清空"}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+def knowledge_base_content(request):
+    """返回当前激活知识库的源文件文本内容。"""
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    kb = KnowledgeBaseSession.objects.filter(user=user, is_active=True).first()
+    if not kb:
+        return Response({"error": "当前没有激活的知识库"}, status=status.HTTP_404_NOT_FOUND)
+
+    file_path = kb.source_file_path
+    if not file_path or not os.path.exists(file_path):
+        return Response({"error": "源文件不存在"}, status=status.HTTP_404_NOT_FOUND)
+
+    ext = os.path.splitext(file_path)[1].lower()
+    try:
+        if ext == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        elif ext == '.pdf':
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            content = '\n\n'.join([f"── 第 {i+1} 页 ──\n{doc.page_content}" for i, doc in enumerate(docs)])
+        else:
+            content = "不支持预览此文件类型"
+    except Exception as e:
+        return Response({"error": f"读取文件失败: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        "name": kb.name,
+        "file_type": ext,
+        "chunk_count": kb.chunk_count,
+        "content": content,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET', 'PUT'])
+@authentication_classes([JWTAuthentication])
+def user_profile(request):
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if request.method == 'GET':
+        return Response({
+            "username": user.username,
+            "nickname": profile.nickname or user.username,
+            "avatar": request.build_absolute_uri(profile.avatar.url) if profile.avatar else None,
+        })
+
+    # PUT: 更新昵称和/或密码
+    nickname = request.data.get('nickname', '').strip()
+    old_password = request.data.get('old_password', '')
+    new_password = request.data.get('new_password', '')
+
+    if nickname:
+        profile.nickname = nickname
+        profile.save()
+
+    if new_password:
+        if not user.check_password(old_password):
+            return Response({"error": "旧密码错误"}, status=status.HTTP_400_BAD_REQUEST)
+        user.set_password(new_password)
+        user.save()
+
+    return Response({"message": "保存成功"})
+
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@parser_classes([MultiPartParser])
+def upload_avatar(request):
+    user = request.user
+    if not user.is_authenticated:
+        return Response({"error": "请先登录"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    file = request.FILES.get('avatar')
+    if not file:
+        return Response({"error": "请上传图片"}, status=status.HTTP_400_BAD_REQUEST)
+
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in {'.jpg', '.jpeg', '.png', '.gif', '.webp'}:
+        return Response({"error": "仅支持 jpg/png/gif/webp"}, status=status.HTTP_400_BAD_REQUEST)
+
+    if file.size > 5 * 1024 * 1024:
+        return Response({"error": "图片不能超过 5MB"}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.avatar = file
+    profile.save()
+
+    return Response({"avatar": request.build_absolute_uri(profile.avatar.url)})
